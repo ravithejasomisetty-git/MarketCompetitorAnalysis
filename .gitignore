@@ -1,0 +1,25 @@
+# Installed dependencies and generated Python bytecode are local runtime files.
+.venv/
+__pycache__/
+.streamlit/secrets.toml
+reports/
+*.log
+logs/
+.cache/
+# Local editor preferences, test caches and operating-system metadata.
+.vscode/
+.idea/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+Thumbs.db
+Desktop.ini
+# Generated reports, slide previews and development validation receipts.
+exports/
+.validation/
+*.py[cod]
+# Keep real API credentials private; share only the blank setup template.
+.env
+.env.*
+!.env.example

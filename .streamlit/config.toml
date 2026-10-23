@@ -1,0 +1,12 @@
+[theme]
+# Shared appearance for the browser UI; slide styling lives in presentation_export.py.
+base = "light"
+primaryColor = "#087F72"
+backgroundColor = "#F5F7F9"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#142B38"
+font = "sans serif"
+[server]
+# Serve locally without automatically opening a browser window.
+headless = true
+address = "127.0.0.1"

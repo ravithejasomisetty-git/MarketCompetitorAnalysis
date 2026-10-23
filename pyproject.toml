@@ -1,0 +1,17 @@
+[project]
+# Project metadata and Python version requirements, used by the uv setup command.
+name = "market-competitor-analysis"
+version = "0.1.0"
+description = "AI-orchestrated market exploration, optional product comparison and PowerPoint export"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Pin exact package versions so setup reproduces the tested environment.
+    "streamlit==1.66.0",
+    "langchain-openai==1.7.2",
+    "tavily-python==0.8.5",
+    "pydantic==2.14.1",
+]
+
+[tool.uv]
+package = false
