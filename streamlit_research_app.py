@@ -39,6 +39,12 @@ def clear_result():
         st.session_state[key] = None
 
 
+def move_slide(direction, slide_count):
+    """Change only the saved slide position, keeping research and downloads intact."""
+    st.session_state.slide_index = max(0, min(slide_count - 1,
+        st.session_state.get("slide_index", 0) + direction))
+
+
 with st.sidebar:
     demo = st.toggle("Offline demonstration", key="demo_mode")
     st.caption("Fictional sample data and a scripted coordinator; no live AI calls." if demo
@@ -139,10 +145,17 @@ if result:
     st.subheader("Your market presentation")
     slides = build_slides(result)
     # Reset a stale selection after an application update reduces an existing deck's size.
-    if st.session_state.get("slide_index", 0) >= len(slides):
+    if not 0 <= st.session_state.get("slide_index", 0) < len(slides):
         st.session_state.slide_index = 0
-    index = st.selectbox("Slide", range(len(slides)), key="slide_index",
-                         format_func=lambda i: f"{i + 1}. {slides[i]['title']}")
+    index = st.session_state.get("slide_index", 0)
+    previous, position, following = st.columns([1, 3, 1], vertical_alignment="center")
+    previous.button("Previous", icon=":material/chevron_left:", key="previous_slide",
+                    disabled=index == 0, on_click=move_slide, args=(-1, len(slides)),
+                    help="Go to the previous slide", width="stretch")
+    position.caption(f"Slide {index + 1} of {len(slides)} · {slides[index]['title']}")
+    following.button("Next", icon=":material/chevron_right:", key="next_slide",
+                     disabled=index == len(slides) - 1, on_click=move_slide,
+                     args=(1, len(slides)), help="Go to the next slide", width="stretch")
     st.html(slide_html(slides[index], index + 1, len(slides)))
     st.caption("Up to six summary slides: introduction, comparison and opportunities, then one per product. Use the sidebar toggle for full research; PowerPoint excludes source evidence.")
     if st.session_state.pptx is None:

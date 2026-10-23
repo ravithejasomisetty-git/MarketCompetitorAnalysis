@@ -58,7 +58,7 @@ class AppTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertIsNone(app.session_state["result"]["comparison"]["selected_product"])
         self.assertEqual(len(app.session_state["result"]["comparison"]["competitors"]), 3)
-        self.assertEqual(len(app.selectbox(key="slide_index").options), 5)
+        self.assertTrue(any("Slide 1 of 5" in item.value for item in app.caption))
         self.assertFalse(app.toggle(key="show_sources").value)
         self.assertFalse(app.json)
         self.assertFalse(app.get("link_button"))
@@ -80,7 +80,23 @@ class AppTests(unittest.TestCase):
         result = app.session_state["result"]
         self.assertEqual(result["comparison"]["selected_product"]["name"], "My commuter bicycle")
         self.assertIsNone(result["request"]["company_url"])
-        self.assertEqual(len(app.selectbox(key="slide_index").options), 6)
+        self.assertTrue(any("Slide 1 of 6" in item.value for item in app.caption))
+
+    def test_arrow_navigation_stops_at_boundaries_without_research(self):
+        app = self.demo()
+        button(app, "Explore market").click().run()
+        self.assertTrue(app.button(key="previous_slide").disabled)
+        with patch("market_analysis.workflow_orchestrator.compare") as research:
+            for index in range(1, 5):
+                app.button(key="next_slide").click().run()
+                self.assertEqual(app.session_state["slide_index"], index)
+                self.assertTrue(any(f"Slide {index + 1} of 5" in item.value for item in app.caption))
+            self.assertTrue(app.button(key="next_slide").disabled)
+            app.button(key="previous_slide").click().run()
+            self.assertEqual(app.session_state["slide_index"], 3)
+            self.assertFalse(app.button(key="next_slide").disabled)
+            research.assert_not_called()
+        self.assertFalse(app.exception)
 
     def test_sidebar_sources_toggle_is_optional_and_does_not_research(self):
         app = self.demo()
@@ -93,7 +109,7 @@ class AppTests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertTrue(app.json)
             self.assertEqual(len(app.get("link_button")), 1)
-            self.assertEqual(len(app.selectbox(key="slide_index").options), 5)
+            self.assertTrue(any("Slide 1 of 5" in item.value for item in app.caption))
             app.toggle(key="show_sources").set_value(False).run()
             self.assertFalse(app.json)
             self.assertFalse(app.get("link_button"))
@@ -104,8 +120,7 @@ class AppTests(unittest.TestCase):
     def test_old_prepared_deck_and_out_of_range_selection_are_reset(self):
         app = self.demo()
         button(app, "Explore market").click().run()
-        # Seed an old session before rendering widgets; AppTest cannot serialize an
-        # out-of-range value against an already-rendered five-option selectbox.
+        # Seed an old session to verify a stale slide position is safely reset.
         migrated = AppTest.from_file(APP, default_timeout=30)
         migrated.session_state["result"] = app.session_state["result"]
         migrated.session_state["presentation_version"] = "old-many-slide-layout"
@@ -113,7 +128,7 @@ class AppTests(unittest.TestCase):
         migrated.session_state["slide_index"] = 35
         migrated.run()
         self.assertFalse(migrated.exception)
-        self.assertEqual(migrated.selectbox(key="slide_index").value, 0)
+        self.assertEqual(migrated.session_state["slide_index"], 0)
         self.assertIsNone(migrated.session_state["pptx"])
 
     def test_hidden_product_does_not_leak_and_fields_survive_toggle(self):
@@ -169,7 +184,7 @@ class AppTests(unittest.TestCase):
         button(app, "Explore market").click().run()
         with patch("market_analysis.workflow_orchestrator.compare") as research, patch(
                 "market_analysis.presentation_export.powerpoint_export", return_value=b"pptx-fixture") as export:
-            app.selectbox(key="slide_index").set_value(1).run()
+            app.button(key="next_slide").click().run()
             button(app, "Prepare PowerPoint").click().run()
             self.assertFalse(app.exception)
             self.assertEqual(len(app.get("download_button")), 1)

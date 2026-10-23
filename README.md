@@ -68,7 +68,7 @@ for treating retrieved content as untrusted and validating tool actions still ap
    website and product details are optional. Unchecking it excludes those fields
    from the request, even if previously filled in.
 4. Click **Explore market**.
-5. Navigate the presentation using the slide selector. Click **Prepare PowerPoint**,
+5. Navigate the presentation using the **Previous** and **Next** arrow buttons. The indicator shows your current slide and total. Click **Prepare PowerPoint**,
    then **Download PowerPoint**. Export is a local operation, with no AI calls.
 6. Sources and full research are hidden by default. Enable **Show sources and research
    details** in the left sidebar to inspect them; toggling this never repeats research.
