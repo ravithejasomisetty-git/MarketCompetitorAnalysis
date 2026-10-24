@@ -58,13 +58,46 @@ class OrchestratorTests(unittest.TestCase):
         compare(REQUEST, service)
         self.assertEqual(service.research.call_count, 2)
 
-    def test_no_candidates_still_produces_an_honest_gap_report(self):
+    def test_no_candidates_stops_without_research_or_another_decision(self):
         service = DemoServices()
         service.discover = Mock(return_value=(Shortlist(names=[]), []))
-        result = compare({k: v for k, v in REQUEST.items() if k not in {"product", "company_url"}}, service)
-        self.assertEqual(result["comparison"]["competitors"], [])
-        self.assertEqual(result["comparison"]["opportunities"], [])
-        self.assertIn("incomplete", result["comparison"]["verdict"])
+        model = self.scripted_model(["discover_market", "discover_market"])
+        service.orchestrator_model = Mock(return_value=model)
+        service.research = Mock()
+        service.summarize = Mock()
+        with self.assertRaises(ResearchFailure) as captured:
+            compare(REQUEST, service)
+        self.assertEqual(captured.exception.code, "no_products_in_price_range")
+        self.assertEqual(model.bind_tools.return_value.invoke.call_count, 1)
+        service.discover.assert_called_once()
+        service.research.assert_not_called()
+        service.summarize.assert_not_called()
+
+    def test_no_eligible_competitors_stops_without_retry_or_assessment(self):
+        # A selected product must not keep the run alive when all competitors fail the price gate.
+        for price, currency in [(REQUEST["price_max"] + 1, REQUEST["currency"]),
+                                (None, REQUEST["currency"]), (REQUEST["price_min"], "EUR")]:
+            with self.subTest(price=price, currency=currency):
+                service = DemoServices()
+                original = service.research
+                def research(*args):
+                    products, sources = original(*args)
+                    for product in products:
+                        product.price, product.currency = price, currency
+                    return products, sources
+                service.research = Mock(side_effect=research)
+                service.discover = Mock(wraps=service.discover)
+                service.summarize = Mock()
+                model = self.scripted_model(["discover_market", "research_products", "discover_market"])
+                service.orchestrator_model = Mock(return_value=model)
+                with self.assertRaises(ResearchFailure) as captured:
+                    compare(REQUEST, service)
+                self.assertEqual(captured.exception.code, "no_products_in_price_range")
+                self.assertEqual(str(captured.exception), "I could not find any products in the given price range.")
+                self.assertEqual(model.bind_tools.return_value.invoke.call_count, 2)
+                service.discover.assert_called_once()
+                service.research.assert_called_once()
+                service.summarize.assert_not_called()
 
     def test_assessment_cannot_invent_product_or_source(self):
         for field in ["name", "source_ids"]:

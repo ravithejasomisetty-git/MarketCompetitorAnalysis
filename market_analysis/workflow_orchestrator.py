@@ -38,6 +38,8 @@ Interpret the category, region, budget and optional concept or existing product.
 No existing product is required. Select up to three relevant competitors, not purported best sellers.
 Choose tools to discover candidates, research facts, and assess strengths, weaknesses and opportunities.
 Inspect returned findings. You may request one additional discovery/research pass to address gaps.
+If discovery finds no candidates or research finds no eligible competitors, the workflow stops.
+Do not retry an empty market result, broaden the budget, assess it or produce a report.
 The focus parameter is your short assignment to the specialist, not private reasoning.
 For every action supply reason: a brief decision explanation identifying the observed gap or
 completed prerequisite and expected outcome. Do not provide private chain-of-thought.
@@ -66,6 +68,12 @@ def compare(request, services, progress=lambda message: None):
     state = {"names": None, "discovery": [], "sources": [], "selected": None,
              "eligible": None, "limitations": [], "summary": None, "finished": False}
     counts = {"discover": 0, "research": 0, "assess": 0}
+
+    def stop_empty_market():
+        """End this request without another model call or an empty presentation."""
+        log_event("action_blocked", action="continue_research", reason="no_products_in_price_range")
+        raise ResearchFailure("no_products_in_price_range",
+                              "I could not find any products in the given price range.")
 
     def announce(agent, assignment):
         """Keep the assignment in the result and trace, then notify an optional callback."""
@@ -105,6 +113,9 @@ def compare(request, services, progress=lambda message: None):
         # New candidates invalidate the previous research and assessment.
         state.update(names=names, eligible=None, summary=None)
         log_event("candidates_discovered", names=names, source_ids=[s["id"] for s in state["discovery"]])
+        # An empty discovery is final, even when the user supplied an existing product.
+        if not names:
+            stop_empty_market()
         return json.dumps({"candidates": names, "evidence": state["discovery"]})
 
     @tool
@@ -156,6 +167,9 @@ def compare(request, services, progress=lambda message: None):
                           requested_currency=request["currency"], minimum=request["price_min"], maximum=request["price_max"],
                           reason="unknown_price" if product.price is None else "wrong_currency" if product.currency != request["currency"] else "outside_budget")
                 limitations.append(f"{name} excluded: price could not be verified within the requested budget and currency.")
+        # Stop before sending empty findings back to the AI, which could request more research.
+        if not eligible:
+            stop_empty_market()
         if len(eligible) < 3:
             limitations.append(f"Only {len(eligible)} of 3 competitors could be verified within this budget.")
         state.update(selected=selected, eligible=eligible, limitations=limitations, summary=None,

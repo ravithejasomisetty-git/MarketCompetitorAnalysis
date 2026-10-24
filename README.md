@@ -182,8 +182,12 @@ not independently prove every model-generated assertion.
 
 The assessment distinguishes evidence-based observations from suggested improvements.
 Opportunities are hypotheses for validation with customers, not proof of demand,
-sales, market share or market-entry success. Fewer than three qualifying products
-produces an explicit incomplete report, rather than fabricated competitors.
+sales, market share or market-entry success. One or two qualifying products
+produce an explicit incomplete report. No discovery candidates or zero qualifying
+competitors stops the request immediately with “I could not find any products in
+the given price range.” There is no additional specialist pass, assessment or
+presentation, even if an existing product was supplied. This describes what the
+research could verify, not proof that no such products exist.
 
 ### Call limits
 
