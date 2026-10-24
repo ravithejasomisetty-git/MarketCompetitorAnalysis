@@ -20,12 +20,71 @@ Copy-Item .env.example .env  # Only if .env does not already exist
 ```
 
 For live research, set `OPENAI_API_KEY` and `TAVILY_API_KEY` in `.env` and restart.
-Set `OPENAI_MODEL=gpt-4o-mini` in that same file. This single setting controls the
-request safety classifier, orchestrator and all live specialists; there is no hardcoded model fallback.
-Changing it requires restarting the app. Offline demonstration needs no model setting.
+Set `OPENAI_MODEL=gpt-4o-mini` in that same file. It selects the primary model for
+screening, orchestration and specialists. Optional Nebius fallback is configured
+separately below; model names are never hardcoded in Python.
+Changing it requires restarting the app. The browser interface runs live research only.
 Existing shell environment variables take precedence. The app normally runs at
 http://localhost:8501. Live research sends the submitted context to OpenAI and
-search queries to Tavily and consumes API credits.
+search queries to Tavily and consumes API credits. When routing is enabled, failed
+OpenAI model calls may send the same conversation to your configured Nebius model.
+
+## OpenAI primary with Nebius fallback
+
+Every live AI role uses the same router: request screening, coordination, discovery,
+product research and comparison. It tries the model selected by `OPENAI_MODEL`
+first. When OpenAI has an eligible availability failure, it retries once, then
+attempts the configured Nebius model once. It does not execute or repeat Tavily
+searches, tool actions, or an entire analysis. Each later model call starts with
+OpenAI again; fallback is not a permanent provider switch.
+
+```dotenv
+OPENAI_MODEL=gpt-4o-mini
+MODEL_ROUTING_ENABLED=true
+NEBIUS_API_KEY=your-private-nebius-key
+NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1/
+NEBIUS_MODEL=Qwen/Qwen3-30B-A3B-Instruct-2507
+```
+
+Use the exact case-sensitive API ID from your Nebius catalogue or code example,
+not the display name. The Qwen ID above was verified for public tool calling and
+structured output during integration. Changing accounts, access or models requires
+rechecking compatibility. Model names and credentials remain environment settings.
+`MODEL_ROUTING_ENABLED=false` keeps OpenAI-only behavior and does not require
+Nebius settings. `.env.example` leaves routing disabled until keys are supplied.
+Your existing OpenAI and Tavily keys remain required for live mode.
+
+Eligible failures include connection errors, timeouts, temporary rate limits and
+selected server/unavailability errors. Authentication, permission, billing/quota,
+invalid requests, context/schema validation failures and safety refusals do not
+trigger provider switching. A valid safety decline is final. If both providers
+fail, the app reports a safe error; if screening cannot complete, research stays
+blocked. The configured Nebius endpoint must be an approved HTTPS Token Factory
+host ending in `/v1`, so its key is not sent to an arbitrary URL.
+
+Provider SDK retries are disabled. The router owns a fixed budget of at most two
+OpenAI attempts and one Nebius attempt, each with a 60-second request timeout, plus
+a short retry delay. This is a per-model-call allowance, not a research deadline;
+multiple failed calls can make a run slower and provider work may incur charges.
+Never interpret an interrupted response as proof that the provider did no work.
+
+The fallback preserves the conversation and binds the same permitted tools and
+response schemas. Because endpoint features differ, Nebius receives JSON-schema
+requests with local Pydantic validation, and required tool selection is adapted to
+named-tool or automatic selection. The host rejects a text-only result where a
+tool action was required. All normal tool, source-reference and budget checks still
+apply. No memory layer or extra web-search provider has been added.
+
+Langfuse records separate generation observations for the attempted providers,
+along with `model_attempt_started`, `model_attempt_completed`,
+`model_attempt_failed` and `model_fallback` events. Provider, configured model,
+attempt number and fixed fallback reason codes are visible; prompts, raw errors,
+credentials and research content stay redacted. Model cost estimates depend on
+Langfuse recognising the selected model; unknown model pricing needs configuration
+in Langfuse and should not be interpreted as zero cost.
+
+Stop Streamlit with Ctrl+C, then restart `./run.ps1` after changing `.env` or code.
+Refreshing the browser alone may retain an older imported workflow.
 
 ## Explore or compare
 
@@ -70,17 +129,17 @@ for treating retrieved content as untrusted and validating tool actions still ap
 4. Click **Explore market**.
 5. Navigate the presentation using the **Previous** and **Next** arrow buttons. The indicator shows your current slide and total. Click **Prepare PowerPoint**,
    then **Download PowerPoint**. Export is a local operation, with no AI calls.
-6. Sources and full research are hidden by default. Enable **Show sources and research
-   details** in the left sidebar to inspect them; toggling this never repeats research.
+6. Use **Clear analysis** to discard the current result and prepared download.
 
-To try without keys, enable **Offline demonstration**. It uses fictional product
-fixtures and a scripted coordinator, explicitly labelled as a demonstration;
-it does not run an AI orchestrator or establish any real market findings.
-The example brief is electric bicycles in India, INR 30,000–50,000.
+The launch interface has no demonstration toggle, raw research/source viewer,
+trace viewer or log controls. Logs and traces remain operational services behind
+the application. Streamlit's `client.showErrorDetails="none"` also hides unexpected
+exception messages and stack traces from the browser. The electric bicycle example button fills ordinary input fields;
+it does not select fictional research or start provider calls.
 
-“Top three” means the most relevant products for the category, region, budget and
-intended use; it does not mean verified best sellers. Missing facts remain Unknown.
-An idea and supplied product notes are user assumptions, not verified product facts.
+The three competitors are selected for relevance, not verified best-selling status.
+Missing facts remain Unknown. Ideas and supplied product notes are user assumptions,
+not verified product facts.
 
 ## AI architecture
 
@@ -136,7 +195,9 @@ response. Assessment uses 1 structured model call per pass.
 
 With an existing product and every allowance exhausted, the upper bound is
 **30 searches, 16 page fetches and 69 model calls** (including screening), before provider retries
-(one configured model retry). Agents can finish much earlier. Export uses no API calls.
+(at most two OpenAI attempts and one Nebius attempt per call when routing is enabled).
+That gives at most 207 provider attempts under those research allowances. Agents can
+finish much earlier. Export uses no AI calls.
 
 ## PowerPoint runtime
 
@@ -173,12 +234,12 @@ Presentations contain at most six slides in a fixed order:
 Exploration with three competitors produces five slides. Comparing an existing
 product against three competitors produces six. Longer findings are condensed to
 brief excerpts, with ellipses where needed, rather than adding continuation pages.
-Full findings remain in the saved result and are visible only when the sidebar
-sources/research toggle is enabled.
+Full findings remain in the saved session result for presentation building; raw
+research records and source excerpts are not displayed in the launch interface.
 
 Source evidence, URLs, source appendices and source speaker notes are excluded from
-PowerPoint entirely. The sidebar toggle controls browser visibility only and never
-adds evidence to an export. The app discards previously prepared decks after a
+PowerPoint entirely. Research details and source excerpts are also absent from the
+launch interface. The app discards previously prepared decks after a
 presentation-layout update, so an open session cannot download the old long format.
 
 Research results and prepared PPTX bytes remain in the current Streamlit session;
@@ -186,77 +247,95 @@ refreshing or restarting can lose them. No research reports are automatically sa
 Generated reports, previews and development validation files are excluded from
 version control. PowerPoint is the supported report export.
 
-## Server-side traces
+## Tracing with Langfuse Cloud
 
-Every **Explore market** submission creates `logs/<request-id>.jsonl` on the server,
-including invalid inputs, missing credentials and failed runs. Logs are written
-immediately and survive clearing results or restarting Streamlit. UI reruns and slide
-navigation do not create another request. Preparing a PowerPoint appends export events
-to the original request's file.
+Live requests use **Langfuse Cloud as the primary tracing destination**. They no
+longer create a JSONL file for every query. Offline demonstrations still use local
+`logs/<request-id>.jsonl` files and never contact Langfuse. Existing historical logs
+are left untouched; they are not uploaded or migrated automatically.
 
-The browser shows normal progress, results and short error messages. It does not
-display the activity trace, stack locations or diagnostic panels.
+Add your project configuration to `.env`, then stop and restart Streamlit:
 
-Each JSON line contains a UTC timestamp, request ID, event name and event details:
+```dotenv
+LANGFUSE_PUBLIC_KEY=pk-lf-your-project-key
+LANGFUSE_SECRET_KEY=sk-lf-your-project-secret
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_TRACING_ENABLED=true
+LANGFUSE_TRACING_ENVIRONMENT=development
+```
 
-| Event | What it tells you |
+Use your project's regional base URL: EU `https://cloud.langfuse.com`, US
+`https://us.cloud.langfuse.com`, or Japan `https://jp.cloud.langfuse.com`. These are
+project credentials, not your OpenAI credentials. Keep real values in the ignored
+`.env`; `.env.example` contains blank credential fields. The SDK dependency is pinned
+in `pyproject.toml` and `uv.lock`. Run `uv sync --locked` after updating the code.
+Set `LANGFUSE_TRACING_ENABLED=false` to disable live cloud tracing explicitly.
+Missing or invalid configuration is recorded as an operational warning and does not
+prevent analysis. Restart is required after changing credentials or tracing settings.
+
+### What appears in Langfuse
+
+Each live submission gets one request ID, reused as its Langfuse trace ID. Nested
+observations show screening, coordinator decisions, discovery, product research,
+search/page retrieval, assessment and completion. Validation rejections appear even
+if no agent runs. Later PowerPoint preparation creates another operation with the
+same trace ID, so research and export are correlated without reading a local file.
+
+Model calls appear as generation observations, including safety classification and
+structured responses. They carry the configured model name, actual observed latency,
+and input/output/total token counts when supplied by the provider. Missing counts
+remain absent. Langfuse can estimate model cost from its model-pricing catalogue;
+this is not a provider invoice, and Tavily charges are not included. No fixed model
+prices are hardcoded in this application.
+
+| Observation or event | Meaning |
 |---|---|
-| `request_started` | Request ID and live/demo mode; the submitted brief is redacted |
-| `orchestrator_decision` | Chosen action, candidate/eligible counts, assessment-ready flag and call counts; model-written explanations and assignments are redacted |
-| `specialist_assignment` / `specialist_tool_selected` | Which specialist and action were called; queries, product names and assignments are omitted |
-| `step_started` / `step_completed` | Stage boundaries, elapsed milliseconds and token counts when supplied by the provider |
-| `web_search_result` / `page_fetch_result` | Source counts and retrieval outcomes; URLs and query text are redacted |
-| `competitor_accepted` / `competitor_excluded` | The application's fixed inclusion/exclusion reason code, with product names, prices and currency details redacted |
-| `action_blocked` | Missing prerequisites or exhausted specialist call allowances |
-| `assessment_validated` / `analysis_completed` | Completion, source/product/limitation counts and specialist usage; research narratives are redacted |
-| `step_failed` / `request_failed` | Safe error types, failing stages, field names and code locations |
-| `request_rejected` / `request_finished` | Validation/configuration rejection or final completed/failed status and total duration |
+| `Request safety screening` / `request_screened` | Screening stage, allow/decline/blocked outcome and predefined reason code |
+| `AI orchestrator / delegation` / `orchestrator_decision` | Model calls and selected actions with counts and prerequisite flags |
+| Research, search and page-fetch steps | Nested durations, retrieval outcomes and source counts |
+| `competitor_accepted` / `competitor_excluded` | Fixed price/currency/citation eligibility reason; private facts are redacted |
+| `action_blocked` | A prerequisite or call allowance prevented an action |
+| `step_failed` / `request_failed` | Safe error types, stages and code locations; no exception messages |
+| `request_rejected` / `request_finished` | Final request outcome and elapsed time |
+| `PowerPoint export` / `export_completed` | Export status and output byte count, connected to the original trace ID |
 
-The model still supplies a short explanation to the coordinator, but this text can
-contain private research context and is no longer written to trace files. Follow
-the selected actions, prerequisite flags, counts and fixed validation reason codes
-to understand execution. Demo decisions remain scripted and labelled as such.
+Open the project's Tracing view and locate the request by its trace ID or time.
+Refresh after a few seconds: observations are exported in background batches. Request
+text and diagnostic panels are not displayed in the Streamlit browser.
 
-From the project folder, inspect or follow the newest trace using PowerShell:
+### Privacy and local operational logs
 
-```powershell
-$trace = Get-ChildItem .\logs\*.jsonl | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-Get-Content -LiteralPath $trace.FullName -Wait
-```
+Only operational metadata leaves the application. Submitted briefs, product names,
+prices, queries, URLs, page excerpts, prompts, model responses and model-written
+rationales are redacted. Application-defined reason codes remain visible. The
+integration uses a metadata-only LangChain callback rather than an automatic
+callback that could collect full prompts and responses. It uses a separate tracing
+provider and ends spans manually so raw exception messages are not captured by
+SDK exception instrumentation. The shared privacy filter is applied before export,
+with another SDK metadata mask as defense in depth.
 
-To show just the orchestrator's decisions, omit `-Wait` and run:
+Langfuse connectivity/configuration failures and offline log-write failures go to
+`logs/operations.log`, rotated at approximately 1 MB with at most three backups.
+Only fixed warning codes and generated request IDs are written, never raw SDK
+error bodies. Set `MARKET_LOG_DIR` to change this directory. If even operational
+logging cannot write, the application emits a fixed safe warning to the server
+console. Logging failures do not block research or turn a successful run into an error.
+The request safety gate still blocks rejected or unavailable safety decisions.
 
-```powershell
-Get-Content -LiteralPath $trace.FullName | ConvertFrom-Json | Where-Object event -eq 'orchestrator_decision' | ForEach-Object { $_.details | ConvertTo-Json -Depth 8 }
-```
+There is no local duplicate of live traces and no disk backlog for Cloud outages.
+An outage, failed delivery, abrupt shutdown or disabled tracing can therefore leave
+a gap in the detailed execution record. Background SDK retries are not a durable
+storage guarantee. Historical JSONL files remain available for manual archive/deletion.
+Demo JSONL files are retained until removed; only `operations.log` rotates automatically.
 
-Set an absolute `MARKET_LOG_DIR` in `.env` to change the location. The server account
-must be able to write there; if logging cannot start, the app does not begin unlogged
-research. Logs are ignored by Git and are not included in PowerPoint downloads.
-Files are retained until you delete/archive them; no automatic expiration is applied.
-
-Logging now uses a metadata-only policy. Briefs, product names, prices, queries,
-assignments, model-written explanations, research narratives and URLs are omitted.
-Unknown fields and arbitrary text are denied by default. Credential-shaped fields,
-known credential values from the environment/local `.env`, and recognized token,
-authorization, email and phone patterns are also masked. Full prompts, provider
-error bodies, model responses and page excerpts must never be passed as log content.
-
-Logs stay server-side and are ignored by Git. Metadata can still reveal operational
-activity and timing, so access to the folder should remain limited to operators.
-New folders/files use restrictive creation modes on platforms that support them;
-Windows permissions are controlled by the parent folder's ACL. Redaction is defense
-in depth, not permission to log arbitrary secrets.
-
-To apply the same policy to older traces, while queries are idle, run:
+The privacy policy can still be applied to old JSONL files while queries are idle:
 
 ```powershell
 .venv\Scripts\python.exe -B -c "from market_analysis.trace_logging import sanitize_existing_logs; print('Sanitized log files:', sanitize_existing_logs())"
 ```
 
-This rewrites traces atomically without an unsanitized backup. It preserves event
-order, timestamps and request IDs. A file changed by an active request is left
-untouched and the operation raises an error so it can be retried safely.
+Logs and credentials are ignored by Git. Restrict local folder access and Langfuse
+project access appropriately; metadata still reveals operational activity and timing.
 
 ## Code guide
 
@@ -266,11 +345,13 @@ untouched and the operation raises an error so it can be retried safely.
 | `market_analysis/workflow_orchestrator.py` | AI coordinator instructions, tool execution, evidence checks, filtering and call limits |
 | `market_analysis/request_screening.py` | Checks the submitted request before the coordinator; stops on rejection or an unavailable safety decision |
 | `market_analysis/react_specialist_agents.py` | Discovery, shared product research and opportunity/comparison agents |
-| `market_analysis/live_research_services.py` | OpenAI model and Tavily search/page adapters |
+| `market_analysis/live_research_services.py` | Routed model and Tavily search/page adapters |
+| `market_analysis/model_router.py` | OpenAI-first availability retries, Nebius fallback and provider-specific bindings |
 | `market_analysis/offline_demo_research.py` | Fictional fixtures and a clearly labelled scripted coordinator |
 | `market_analysis/research_schemas.py` | Validated requests, optional selected product, facts, assessments and opportunities |
 | `market_analysis/research_errors.py` | Safe error messages and diagnostics without raw provider payloads |
-| `market_analysis/trace_logging.py` | Request IDs, per-request server files, event redaction and session isolation |
+| `market_analysis/trace_logging.py` | Request IDs, private event routing, offline JSONL and historical sanitization |
+| `market_analysis/cloud_tracing.py` | Langfuse observations, model usage and rotating operational warnings |
 | `market_analysis/presentation_export.py` | Shared slide content, escaped HTML preview and the Node export bridge |
 | `market_analysis/powerpoint_renderer.mjs` | Editable PowerPoint text shapes using Artifact Tool |
 | `market_analysis/__init__.py` | Python package marker |
@@ -342,7 +423,7 @@ a widget interaction. It is not a database or permanent report archive.
 The important boundary is `if submitted:`. A click on **Explore market** makes that
 condition true. The code clears the previous result, starts a request trace, checks
 the entered values and selects either `LiveServices` or `DemoServices`. It then
-calls `compare(...)`. Changing a slide or the sources toggle does not enter this
+calls `compare(...)`. Changing a slide does not enter this
 branch, so those actions do not repeat paid research.
 
 When the existing-product checkbox is off, product fields are deliberately omitted
@@ -359,14 +440,14 @@ and gives the AI a structured response format.
 | Record | What it carries | Where it is used |
 |---|---|---|
 | `ResearchRequest` | Category, market, budget, currency and optional product/context | Form validation and every specialist assignment |
-| `Source` | Evidence ID, URL, title, excerpt, retrieval time and method | Research evidence and the optional source view |
+| `Source` | Evidence ID, URL, title, excerpt, retrieval time and method | Internal research evidence and citation checks |
 | `Shortlist` | Up to three candidate names | Discovery output |
 | `ProductFacts` | Price, availability, performance, features, support, drawbacks and citations | Structured product-research output |
 | `Product` | ProductFacts plus the assigned product name | Coordinator validation and report assembly |
 | `ProductAssessment` | Positives, negatives, suggested improvements and citations for one name | Assessment specialist output |
 | `Opportunity` | A dimension, observed gap, suggested change and citations | Market-level opportunities |
 | `Summary` | Assessment specialist's verdict, assessments, opportunities and limitations | Checked before the report can finish |
-| `Comparison` | Optional selected product, qualifying competitors and final assessment | Saved result, slide builder and source/details view |
+| `Comparison` | Optional selected product, qualifying competitors and final assessment | Saved result and slide builder |
 
 For example, `price=None` means that no price is known. It does not mean free, zero,
 or the budget minimum. A source ID acts like a record reference: it connects a
@@ -427,10 +508,10 @@ client. Its `discover`, `research` and `summarize` methods delegate to the speci
 implementations. Its `search` and `extract` methods perform the web operations that
 specialists request. These adapters keep provider-specific details out of the UI.
 
-All live roles reuse one client selected by `OPENAI_MODEL` in `.env` (the example
-configuration uses `gpt-4o-mini`). They do not share
-one conversation: each agent builds its own message list, so the coordinator and
-research specialists have different instructions and histories.
+All live roles use `model_router.py`. `OPENAI_MODEL` selects the primary client
+and `NEBIUS_MODEL` selects the optional backup. Provider clients have separate keys
+and callbacks. Agents do not share one conversation: each builds its own messages,
+and the router preserves those messages when retrying that particular inference call.
 
 The `sources()` helper discards unusable records, creates IDs from URL/content,
 and bounds the retained text to 2,500 characters for searches or 8,000 characters
@@ -483,8 +564,8 @@ Open `presentation_export.py`. `build_slides()` reads that result without starti
 another agent. It selects brief excerpts for five slides when three competitors are
 present, or six when there is also an existing product. It can produce fewer slides
 when fewer products qualify. `slide_html()` escapes the text before putting it into
-the browser preview. Full findings and sources are displayed separately only when
-the user enables the sidebar toggle.
+the browser preview. Full findings and sources remain internal; the launch interface does not display
+raw research records or evidence excerpts.
 
 When **Prepare PowerPoint** is clicked, `powerpoint_export()` writes the shared
 slide content into a temporary JSON file and launches `powerpoint_renderer.mjs`.
@@ -492,9 +573,11 @@ That JavaScript file positions editable text boxes and saves a PPTX. Python read
 the file's bytes before cleaning up the temporary directory. Streamlit stores those
 bytes for the download button. Neither the renderer nor the exporter calls an AI.
 
-### 8. Use demo mode to learn the flow without provider calls
+### 8. Use developer fixtures without provider calls
 
-Open `offline_demo_research.py`. `DemoOrchestratorModel.invoke()` returns scripted
+The browser does not expose offline demonstration mode. Developer fixtures remain
+available in `offline_demo_research.py` for automated tests and direct Python use.
+`DemoOrchestratorModel.invoke()` returns scripted
 requests for discovery, research, assessment and completion. `DemoServices` provides
 fictional products through the same method signatures as the live adapter. This
 makes it useful for stepping through validation, presentation and export locally.
@@ -504,10 +587,13 @@ web evidence.
 ## Read a request trace alongside the code
 
 Open `trace_logging.py` to connect log events with functions. The UI starts a
-`request_trace(...)` context, which creates the file and request ID. Calls to
-`log_event(...)` in nested components look up that active context automatically.
-After research, `resume_trace(...)` lets an export append events to the same file.
-Calling `compare()` directly outside a trace context does not create a trace file.
+`request_trace(...)` context, which creates a request ID and selects Cloud for live
+runs or a JSONL file for demos. Calls to `log_event(...)` look up that active context.
+After live research, `resume_trace(request_id)` attaches export work to the same
+Cloud trace ID. Developer fixture callers can explicitly pass `demo=True` for
+local tracing and export correlation. Direct `compare()` callers should open a request
+trace context first if they need observations. `cloud_tracing.py` converts stage
+boundaries into nested observations and records model usage without message content.
 
 For the historical log excerpt shared before metadata-only redaction was enabled
 from request `baab5fe69d8b4cddae16edc81b90cfa0`, the
@@ -567,7 +653,7 @@ When an ordinary provider exception occurs, `run_step` raises a `ResearchFailure
 with an application-authored message and links the original exception as its cause.
 `failure_details()` follows that chain to collect error types and code locations,
 without recording raw provider bodies or submitted values. The browser receives a
-short error message; the request file contains the selected diagnostic metadata.
+short error message; the selected tracing destination contains safe diagnostic metadata.
 
 A page-fetch failure can be recorded while the overall request still completes:
 the product researcher catches that failure, returns an explicit gap and continues
@@ -585,11 +671,13 @@ without spending API credits or relying on live websites.
 
 | Test file | Read it when you want an example of |
 |---|---|
-| `test_streamlit_research_app.py` | Checkbox behavior, hidden sources, saved slides, export retries and old-session migration |
+| `test_streamlit_research_app.py` | Live-only controls, hidden diagnostics, saved slides, export retries and old-session migration |
 | `test_workflow_orchestrator.py` | Model-requested repeat research, premature completion, prerequisites and filtering |
 | `test_live_research_services.py` | Tool selection, page retrieval and per-product citation contracts with mocked providers |
 | `test_comparison.py` | Invalid inputs, unknown prices, currency/budget filtering and rejected evidence |
-| `test_trace_logging.py` | Request correlation, concurrent-user isolation and credential masking |
+| `test_trace_logging.py` | Offline request correlation, isolation and credential masking |
+| `test_cloud_tracing.py` | Cloud routing, nested observations, model usage, SDK masking and nonblocking failures |
+| `test_model_router.py` | Availability-only fallback, retry limits, tool/schema preservation and credential separation |
 | `test_research_errors.py` | Safe exception metadata and field-validation diagnostics |
 | `test_presentation_export.py` | Source-free editable PowerPoint output and the six-slide maximum |
 

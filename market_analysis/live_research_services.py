@@ -5,15 +5,14 @@ interface. Specialists call search and extract to retrieve evidence. The same
 configured model client is reused, but each agent constructs its own conversation.
 Provider response shapes are converted here into the Source records used elsewhere."""
 import hashlib
-import os
 from datetime import datetime, timezone
 from langchain_openai import ChatOpenAI
 from tavily import TavilyClient
 from .research_schemas import Source, public_url
 from .react_specialist_agents import DISCOVERY_AGENT, PRODUCT_RESEARCH_AGENT, ComparisonAgent
 from .trace_logging import log_event, safe_url
-from .research_errors import ResearchFailure
 from .request_screening import classify_request
+from .model_router import create_model_router
 
 class LiveServices:
     demo = False
@@ -21,17 +20,12 @@ class LiveServices:
     def __init__(self, openai_key, tavily_key):
         """Create reusable OpenAI and Tavily clients for one submitted live analysis.
         
-        Keys are supplied by the UI; OPENAI_MODEL selects the shared model from the environment.
-        Client timeout and retry settings
-        apply to provider calls; they are not an overall deadline for the full workflow."""
-        # Require an explicit project-wide setting rather than silently using a code default.
-        model_name = os.environ.get("OPENAI_MODEL", "").strip()
-        if not model_name:
-            raise ResearchFailure("missing_model", "Set OPENAI_MODEL in .env and restart the app.", "Provider configuration")
-        self.llm = ChatOpenAI(model=model_name, api_key=openai_key,
-                              temperature=0, timeout=60, max_retries=1)
+        Keys are supplied by the UI. The router reads primary and optional fallback
+        model settings from the environment. Its timeout/retry budget applies to
+        individual model calls, not the overall research workflow."""
+        self.llm = create_model_router(openai_key, model_factory=ChatOpenAI)
         self.web = TavilyClient(api_key=tavily_key)
-        log_event("providers_initialized", model=model_name, model_timeout_seconds=60, model_max_retries=1,
+        log_event("providers_initialized", model=self.llm.primary_name, model_timeout_seconds=60, model_max_retries=1,
                   search_provider="Tavily")
 
     def screen_request(self, request):

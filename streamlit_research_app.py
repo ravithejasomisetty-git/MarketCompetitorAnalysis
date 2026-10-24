@@ -2,15 +2,14 @@
 
 Read the form first, then the `if submitted` block to follow a new query. Streamlit
 runs this file again after widget interactions; session_state keeps the previous
-result and download alive. Only clicking Explore market starts research. Sources
-are hidden until enabled in the sidebar, and detailed execution traces stay on disk."""
+result and download alive. Only clicking Explore market starts research. Research
+diagnostics stay out of the interface; live execution traces go to Langfuse."""
 import os
 import streamlit as st
 from pydantic import ValidationError
 from market_analysis.research_schemas import ResearchRequest
 from market_analysis.workflow_orchestrator import compare
 from market_analysis.research_errors import ResearchFailure, failure_details
-from market_analysis.offline_demo_research import DemoServices
 from market_analysis.presentation_export import build_slides, slide_html, powerpoint_export, PRESENTATION_VERSION
 from market_analysis.trace_logging import request_trace, resume_trace, log_event
 
@@ -45,11 +44,13 @@ def move_slide(direction, slide_count):
         st.session_state.get("slide_index", 0) + direction))
 
 
+# Discard retired controls and fictional results from sessions opened before launch.
+st.session_state.pop("demo_mode", None)
+st.session_state.pop("show_sources", None)
+if st.session_state.result and st.session_state.result.get("demo"):
+    clear_result()
+
 with st.sidebar:
-    demo = st.toggle("Offline demonstration", key="demo_mode")
-    st.caption("Fictional sample data and a scripted coordinator; no live AI calls." if demo
-               else "Live research uses an AI orchestrator, OpenAI and Tavily.")
-    show_sources = st.toggle("Show sources and research details", value=False, key="show_sources")
     st.button("Clear analysis", on_click=clear_result)
 
 st.button("Use electric bicycle example", on_click=example)
@@ -79,11 +80,11 @@ if submitted:
     # Input edits alone do not start paid research; only this button-triggered branch can.
     clear_result()
     try:
-        # Log only the brief's identifying fields, not free-text concepts or product notes.
+        # The privacy filter redacts brief details before either trace destination.
         with request_trace({"category": category, "market": market, "price_min": low,
                             "price_max": high, "currency": currency, "has_product": has_product,
                             "product": product if has_product else None,
-                            "has_concept": bool(context.strip())}, demo=demo) as trace:
+                            "has_concept": bool(context.strip())}) as trace:
             st.session_state.trace_id = trace.request_id
             try:
                 if has_product and not (product or "").strip():
@@ -95,15 +96,12 @@ if submitted:
                         currency=currency.strip().upper(), exploration_context=context,
                         product=product if has_product else None, company_url=url if has_product else None,
                         founder_details=(details or "") if has_product else "")
-                    if not demo and not all(os.environ.get(key, "").strip() for key in ["OPENAI_API_KEY", "TAVILY_API_KEY"]):
+                    if not all(os.environ.get(key, "").strip() for key in ["OPENAI_API_KEY", "TAVILY_API_KEY"]):
                         trace.reject("missing_provider_credentials")
-                        st.error("Add OPENAI_API_KEY and TAVILY_API_KEY to .env and restart, or use offline demonstration.")
+                        st.error("Live research is not configured. Please contact the host.")
                     else:
-                        if demo:
-                            services = DemoServices()
-                        else:
-                            from market_analysis.live_research_services import LiveServices
-                            services = LiveServices(os.environ["OPENAI_API_KEY"], os.environ["TAVILY_API_KEY"])
+                        from market_analysis.live_research_services import LiveServices
+                        services = LiveServices(os.environ["OPENAI_API_KEY"], os.environ["TAVILY_API_KEY"])
                         # Show a normal progress label; detailed activity belongs only in server logs.
                         with st.status("Exploring the market...", expanded=False) as status:
                             result = compare(request.model_dump(mode="json"), services)
@@ -120,18 +118,17 @@ if submitted:
                     trace.reject("prompt_injection_detected")
                 else:
                     trace.fail(exc)
-                message = exc.public_message if isinstance(exc, ResearchFailure) else "Research setup failed. Details were recorded in the server logs."
+                message = exc.public_message if isinstance(exc, ResearchFailure) else "Market research could not start. Please retry or contact the host."
                 st.session_state.research_error = {"message": message, "stage": failure_details(exc)["stage"], "declined": declined}
     except OSError:
-        # Do not start unlogged research when the server cannot write its trace directory.
-        st.error("Server logging is unavailable. Check write permissions for the configured log folder before retrying.")
+        st.error("The application could not access a required local resource. Please retry or contact the host.")
 
 if st.session_state.research_error:
     error = st.session_state.research_error
     if error.get("declined"):
         st.warning(error["message"])
     else:
-        st.error(f"{error['stage']}: {error['message']}")
+        st.error(error["message"])
 
 # Read saved results: changing slides and downloading never repeats research.
 result = st.session_state.result
@@ -140,8 +137,6 @@ if result:
         st.session_state.pptx = None
         st.session_state.slide_index = 0
         st.session_state.presentation_version = PRESENTATION_VERSION
-    if result["demo"]:
-        st.warning("FICTIONAL DEMONSTRATION — products, prices and findings are illustrative; no live research occurred.")
     st.subheader("Your market presentation")
     slides = build_slides(result)
     # Reset a stale selection after an application update reduces an existing deck's size.
@@ -157,7 +152,7 @@ if result:
                      disabled=index == len(slides) - 1, on_click=move_slide,
                      args=(1, len(slides)), help="Go to the next slide", width="stretch")
     st.html(slide_html(slides[index], index + 1, len(slides)))
-    st.caption("Up to six summary slides: introduction, comparison and opportunities, then one per product. Use the sidebar toggle for full research; PowerPoint excludes source evidence.")
+    st.caption("Up to six summary slides: introduction, comparison and opportunities, then one per product. PowerPoint excludes source evidence.")
     if st.session_state.pptx is None:
         if st.button("Prepare PowerPoint", icon=":material/slideshow:"):
             try:
@@ -169,17 +164,9 @@ if result:
                     log_event("export_completed", bytes=len(st.session_state.pptx))
                 st.session_state.export_error = None
             except Exception:
-                st.session_state.export_error = "PowerPoint could not be prepared. Check the presentation runtime setup in README and try again. Your research is still available."
+                st.session_state.export_error = "PowerPoint could not be prepared. Please retry or contact the host. Your research is still available."
     if st.session_state.pptx:
         st.download_button("Download PowerPoint", st.session_state.pptx, "market-analysis.pptx",
                            "application/vnd.openxmlformats-officedocument.presentationml.presentation")
     if st.session_state.export_error:
         st.error(st.session_state.export_error)
-    if show_sources:
-        st.subheader("Sources and research details")
-        st.json(result["request"])
-        st.json(result["comparison"])
-        for source in result["sources"]:
-            st.link_button(f"{source['id']} — {source['title']}", source["url"])
-            st.caption(source["observed_at"])
-            st.text(source["excerpt"])

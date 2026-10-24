@@ -39,7 +39,7 @@ def run_step(stage, operation):
     # Keep the original cause for diagnostics while showing only an authored public message.
     except Exception as exc:
         log_event("step_failed", stage=stage, duration_ms=round((perf_counter() - started) * 1000, 2), diagnostics=failure_details(exc))
-        raise ResearchFailure("step_failed", "This research step could not complete. Details were recorded in the server logs.", stage) from exc
+        raise ResearchFailure("step_failed", "This research step could not complete. Please retry or contact the host.", stage) from exc
     # Providers may supply usage counts; record numeric totals without the model's response text.
     usage = getattr(result, "usage_metadata", None)
     tokens = {k: usage[k] for k in ("input_tokens", "output_tokens", "total_tokens")

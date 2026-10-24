@@ -19,13 +19,13 @@ def tool_call(tool, args, identity):
 
 class AgentTests(unittest.TestCase):
     def test_shared_model_is_loaded_from_environment(self):
-        with patch.dict("os.environ", {"OPENAI_MODEL": " configured-model "}), patch(
+        with patch.dict("os.environ", {"OPENAI_MODEL": " configured-model ", "MODEL_ROUTING_ENABLED": "false"}), patch(
                 "market_analysis.live_research_services.ChatOpenAI") as model, patch(
                 "market_analysis.live_research_services.TavilyClient"), patch(
                 "market_analysis.live_research_services.log_event") as log:
             service = LiveServices("test-openai", "test-tavily")
             self.assertEqual(model.call_args.kwargs["model"], "configured-model")
-            self.assertIs(service.orchestrator_model(), model.return_value)
+            self.assertIs(service.orchestrator_model().primary, model.return_value)
             self.assertEqual(log.call_args.kwargs["model"], "configured-model")
 
     def test_missing_model_is_rejected_before_provider_initialization(self):

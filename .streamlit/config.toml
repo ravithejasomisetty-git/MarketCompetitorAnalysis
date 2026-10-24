@@ -6,6 +6,11 @@ backgroundColor = "#F5F7F9"
 secondaryBackgroundColor = "#FFFFFF"
 textColor = "#142B38"
 font = "sans serif"
+[client]
+# Keep unexpected exception messages and stack traces out of the public interface.
+showErrorDetails = "none"
+# Hide developer-only toolbar actions in the launch interface.
+toolbarMode = "viewer"
 [server]
 # Serve locally without automatically opening a browser window.
 headless = true

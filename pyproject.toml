@@ -11,6 +11,7 @@ dependencies = [
     "langchain-openai==1.7.2",
     "tavily-python==0.8.5",
     "pydantic==2.14.1",
+    "langfuse==4.18.0",
 ]
 
 [tool.uv]

@@ -3,6 +3,9 @@ import unittest
 import json
 import tempfile
 from pathlib import Path
+from contextlib import contextmanager
+from market_analysis.offline_demo_research import DemoServices
+from market_analysis.trace_logging import request_trace as original_trace, resume_trace as original_resume
 from unittest.mock import patch
 from streamlit.testing.v1 import AppTest
 
@@ -19,20 +22,37 @@ class AppTests(unittest.TestCase):
         folder = tempfile.TemporaryDirectory(prefix="market-ui-logs-")
         self.addCleanup(folder.cleanup)
         self.log_dir = Path(folder.name)
-        override = patch.dict("os.environ", {"MARKET_LOG_DIR": folder.name})
+        override = patch.dict("os.environ", {"MARKET_LOG_DIR": folder.name,
+            "OPENAI_API_KEY": "test-key", "TAVILY_API_KEY": "test-key"})
         override.start()
         self.addCleanup(override.stop)
+
+        # Production is live-only. Tests replace the provider boundary with fixtures,
+        # and route test observations locally without introducing a hidden demo mode.
+        service = DemoServices()
+        service.demo = False
+        backend = patch("market_analysis.live_research_services.LiveServices", return_value=service)
+        backend.start(); self.addCleanup(backend.stop)
+        @contextmanager
+        def local_trace(brief, **kwargs):
+            with original_trace(brief, demo=True) as trace:
+                yield trace
+        @contextmanager
+        def local_resume(request_id, **kwargs):
+            with original_resume(request_id, demo=True) as trace:
+                yield trace
+        for target, replacement in [("request_trace", local_trace), ("resume_trace", local_resume)]:
+            boundary = patch("market_analysis.trace_logging." + target, replacement)
+            boundary.start(); self.addCleanup(boundary.stop)
 
     def events(self):
         return [json.loads(line) for path in self.log_dir.glob("*.jsonl") for line in path.read_text(encoding="utf-8").splitlines()]
 
-    def demo(self):
-        app = AppTest.from_file(APP, default_timeout=30).run()
-        app.toggle(key="demo_mode").set_value(True).run()
-        return app
+    def app(self):
+        return AppTest.from_file(APP, default_timeout=30).run()
 
     def test_safety_decline_shows_polite_warning_without_research(self):
-        app = self.demo()
+        app = self.app()
         with patch("market_analysis.offline_demo_research.DemoServices.screen_request",
                    return_value={"outcome": "decline", "reason": "instruction_override"}), \
              patch("market_analysis.offline_demo_research.DemoServices.orchestrator_model") as coordinator:
@@ -47,7 +67,7 @@ class AppTests(unittest.TestCase):
         self.assertFalse(any(e["event"] == "orchestrator_decision" for e in events))
 
     def test_default_is_market_exploration_without_product_fields(self):
-        app = self.demo()
+        app = self.app()
         self.assertFalse(app.exception)
         self.assertFalse(app.checkbox(key="has_product").value)
         self.assertNotIn("f_product", [x.key for x in app.text_input])
@@ -59,7 +79,7 @@ class AppTests(unittest.TestCase):
         self.assertIsNone(app.session_state["result"]["comparison"]["selected_product"])
         self.assertEqual(len(app.session_state["result"]["comparison"]["competitors"]), 3)
         self.assertTrue(any("Slide 1 of 5" in item.value for item in app.caption))
-        self.assertFalse(app.toggle(key="show_sources").value)
+        self.assertFalse(app.toggle)
         self.assertFalse(app.json)
         self.assertFalse(app.get("link_button"))
         self.assertEqual(len(list(self.log_dir.glob("*.jsonl"))), 1)
@@ -70,7 +90,7 @@ class AppTests(unittest.TestCase):
         self.assertNotIn("Diagnostic details", [e.label for e in app.expander])
 
     def test_checkbox_reveals_product_and_website_is_optional(self):
-        app = self.demo()
+        app = self.app()
         app.checkbox(key="has_product").check().run()
         app.text_input(key="f_product").set_value("My commuter bicycle")
         self.assertEqual(app.text_input(key="f_url").value, "")
@@ -83,7 +103,7 @@ class AppTests(unittest.TestCase):
         self.assertTrue(any("Slide 1 of 6" in item.value for item in app.caption))
 
     def test_arrow_navigation_stops_at_boundaries_without_research(self):
-        app = self.demo()
+        app = self.app()
         button(app, "Explore market").click().run()
         self.assertTrue(app.button(key="previous_slide").disabled)
         with patch("market_analysis.workflow_orchestrator.compare") as research:
@@ -98,27 +118,38 @@ class AppTests(unittest.TestCase):
             research.assert_not_called()
         self.assertFalse(app.exception)
 
-    def test_sidebar_sources_toggle_is_optional_and_does_not_research(self):
-        app = self.demo()
+    def test_launch_ui_has_no_demo_sources_or_diagnostics_controls(self):
+        app = self.app()
+        self.assertFalse(app.toggle)
         button(app, "Explore market").click().run()
+        self.assertFalse(app.toggle)
         self.assertFalse(app.json)
-        self.assertEqual(len(app.sidebar.toggle), 2)
-        with patch("market_analysis.workflow_orchestrator.compare") as research, patch(
-                "market_analysis.presentation_export.powerpoint_export") as export:
-            app.toggle(key="show_sources").set_value(True).run()
-            self.assertFalse(app.exception)
-            self.assertTrue(app.json)
-            self.assertEqual(len(app.get("link_button")), 1)
-            self.assertTrue(any("Slide 1 of 5" in item.value for item in app.caption))
-            app.toggle(key="show_sources").set_value(False).run()
+        self.assertFalse(app.get("link_button"))
+        self.assertFalse(app.exception)
+        with patch("market_analysis.workflow_orchestrator.compare") as research:
+            # Retired session flags cannot expose hidden controls or raw details.
+            app.session_state["demo_mode"] = True
+            app.session_state["show_sources"] = True
+            app.run()
             self.assertFalse(app.json)
-            self.assertFalse(app.get("link_button"))
+            self.assertFalse(app.toggle)
             research.assert_not_called()
-            export.assert_not_called()
         self.assertEqual(sum(e["event"] == "request_started" for e in self.events()), 1)
 
+    def test_old_demo_report_and_download_are_discarded(self):
+        app = self.app()
+        button(app, "Explore market").click().run()
+        old = dict(app.session_state["result"])
+        old["demo"] = True
+        app.session_state["result"] = old
+        app.session_state["pptx"] = b"fictional-presentation"
+        app.run()
+        self.assertIsNone(app.session_state["result"])
+        self.assertIsNone(app.session_state["pptx"])
+        self.assertFalse(app.get("download_button"))
+
     def test_old_prepared_deck_and_out_of_range_selection_are_reset(self):
-        app = self.demo()
+        app = self.app()
         button(app, "Explore market").click().run()
         # Seed an old session to verify a stale slide position is safely reset.
         migrated = AppTest.from_file(APP, default_timeout=30)
@@ -132,7 +163,7 @@ class AppTests(unittest.TestCase):
         self.assertIsNone(migrated.session_state["pptx"])
 
     def test_hidden_product_does_not_leak_and_fields_survive_toggle(self):
-        app = self.demo()
+        app = self.app()
         app.checkbox(key="has_product").check().run()
         app.text_input(key="f_product").set_value("Private product").run()
         app.text_input(key="f_url").set_value("https://example.com").run()
@@ -144,7 +175,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(app.text_input(key="f_product").value, "Private product")
 
     def test_missing_existing_product_name_does_not_research(self):
-        app = self.demo()
+        app = self.app()
         app.checkbox(key="has_product").check().run()
         with patch("market_analysis.workflow_orchestrator.compare") as research:
             button(app, "Explore market").click().run()
@@ -158,19 +189,20 @@ class AppTests(unittest.TestCase):
                 "market_analysis.workflow_orchestrator.compare") as research:
             button(app, "Explore market").click().run()
             research.assert_not_called()
+        self.assertTrue(app.error)
         self.assertTrue(any(e["event"] == "request_rejected" and e["details"]["reason"] == "missing_provider_credentials" for e in self.events()))
 
-    def test_logging_unavailable_blocks_unlogged_research(self):
-        app = self.demo()
-        with patch("market_analysis.trace_logging.request_trace", side_effect=PermissionError()), patch(
-                "market_analysis.workflow_orchestrator.compare") as research:
+    def test_local_logging_failure_does_not_block_research(self):
+        app = self.app()
+        with patch("market_analysis.trace_logging.RequestTrace._write_local", side_effect=PermissionError()):
             button(app, "Explore market").click().run()
-            research.assert_not_called()
         self.assertFalse(app.exception)
-        self.assertIn("Server logging is unavailable", app.error[0].value)
+        self.assertFalse(app.error)
+        self.assertIsNotNone(app.session_state["result"])
+        self.assertTrue((self.log_dir / "operations.log").exists())
 
     def test_invalid_category_does_not_research(self):
-        app = self.demo()
+        app = self.app()
         app.text_input(key="f_category").set_value("")
         with patch("market_analysis.workflow_orchestrator.compare") as research:
             button(app, "Explore market").click().run()
@@ -180,7 +212,7 @@ class AppTests(unittest.TestCase):
         self.assertTrue(any(e["event"] == "request_rejected" for e in self.events()))
 
     def test_slides_and_pptx_download_survive_rerun_without_research(self):
-        app = self.demo()
+        app = self.app()
         button(app, "Explore market").click().run()
         with patch("market_analysis.workflow_orchestrator.compare") as research, patch(
                 "market_analysis.presentation_export.powerpoint_export", return_value=b"pptx-fixture") as export:
@@ -199,7 +231,7 @@ class AppTests(unittest.TestCase):
         self.assertIsNone(app.session_state["pptx"])
 
     def test_export_failure_keeps_research_and_can_retry(self):
-        app = self.demo()
+        app = self.app()
         button(app, "Explore market").click().run()
         with patch("market_analysis.presentation_export.powerpoint_export", side_effect=RuntimeError("private")):
             button(app, "Prepare PowerPoint").click().run()
@@ -210,11 +242,12 @@ class AppTests(unittest.TestCase):
         self.assertFalse(app.error)
 
     def test_discovery_failure_is_safe_persistent_and_recoverable(self):
-        app = self.demo()
+        app = self.app()
         with patch("market_analysis.offline_demo_research.DemoServices.discover", side_effect=ValueError("secret-provider-payload")):
             button(app, "Explore market").click().run()
         self.assertFalse(app.exception)
-        self.assertIn("Competitor discovery", app.error[0].value)
+        self.assertNotIn("Competitor discovery", app.error[0].value)
+        self.assertIn("Please retry", app.error[0].value)
         self.assertNotIn("secret-provider-payload", app.error[0].value)
         self.assertEqual(self.events()[-1]["details"]["outcome"], "failed")
         self.assertNotIn("secret-provider-payload", json.dumps(self.events()))
@@ -224,7 +257,7 @@ class AppTests(unittest.TestCase):
         self.assertFalse(app.error)
 
     def test_new_analysis_discards_previous_powerpoint(self):
-        app = self.demo()
+        app = self.app()
         button(app, "Explore market").click().run()
         with patch("market_analysis.presentation_export.powerpoint_export", return_value=b"pptx-fixture"):
             button(app, "Prepare PowerPoint").click().run()

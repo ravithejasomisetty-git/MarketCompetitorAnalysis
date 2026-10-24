@@ -1,10 +1,9 @@
-"""Write a separate server-side JSONL execution trace for each submitted request.
+"""Route private execution metadata to Cloud for live runs and JSONL for demos.
 
-JSONL is a text format with one complete JSON record per line. request_trace creates
-the request ID and file; log_event lets nested services append events; resume_trace
-connects a later export to the same file. ContextVar keeps the active request separate
-between concurrent threads, and a process-local lock prevents interleaved writes.
-Only selected event fields are logged; this is not a transcript of model reasoning."""
+The event interface is shared by the UI and agents. Live requests use Langfuse,
+while demonstrations remain local. Logging failures never prevent research.
+Historical JSONL files are preserved and can still be sanitized explicitly.
+"""
 import json
 import math
 import os
@@ -31,9 +30,11 @@ _PRIVATE_FIELDS = {
     "messages", "prompt", "response", "body", "price", "minimum", "maximum",
     "currency", "requested_currency", "founder_details", "exploration_context",
 }
-_TEXT_FIELDS = {"action", "tool", "agent", "kind", "mode", "outcome", "model",
+_TEXT_FIELDS = {"action", "tool", "agent", "kind", "mode", "outcome", "model", "provider",
                 "id", "source_ids", "code", "error_type", "file", "function", "field", "type"}
 _REASONS = {
+    "model_timeout", "model_connection_failed", "model_rate_limited",
+    "model_service_unavailable", "model_error_not_retryable",
     "screening_passed", "instruction_override", "secret_extraction", "tool_misuse",
     "screening_uncertain", "screening_unavailable", "prompt_injection_detected",
     "specialist_call_limit", "discovery_required", "current_research_required",
@@ -48,7 +49,7 @@ _FIELD_NAMES = _PRIVATE_FIELDS | _TEXT_FIELDS | {
     "finished", "candidate_count", "eligible_count", "assessment_ready", "source_count",
     "duration_ms", "token_usage", "input_tokens", "output_tokens", "total_tokens",
     "model_timeout_seconds", "model_max_retries", "search_provider", "diagnostics", "errors",
-    "frames", "line", "invalid_fields", "bytes", "redacted", "count",
+    "frames", "line", "invalid_fields", "bytes", "redacted", "count", "attempt", "fallback_enabled",
 }
 
 
@@ -129,27 +130,50 @@ def safe_url(value):
 
 
 class RequestTrace:
-    """One request's trace file. Reopening by ID appends later export events to it."""
-    def __init__(self, request_id=None):
+    """One request's destination; live runs do not create per-request log files."""
+    def __init__(self, request_id=None, demo=False, resumed=False):
         self.request_id = request_id or uuid4().hex
         if not re.fullmatch(r"[a-f0-9]{32}", self.request_id):
             raise ValueError("Invalid trace ID.")
-        self.path = log_directory() / f"{self.request_id}.jsonl"
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.path = log_directory() / f"{self.request_id}.jsonl" if demo else None
+        self.demo = demo
         self.outcome = "completed"
+        self.cloud = None
+        if not demo:
+            from .cloud_tracing import CloudTrace, operational_warning
+            try:
+                self.cloud = CloudTrace(self.request_id, resumed=resumed)
+            except Exception:
+                operational_warning("langfuse_initialization_failed", self.request_id)
 
     def event(self, event, **details):
-        """Append one sanitized JSON event and close the file immediately afterward.
-        
-        Closing flushes Python's file buffer so completed events remain readable after an
-        application failure. This is not an fsync guarantee against power loss. Write errors
-        are allowed to propagate instead of silently continuing without a trace."""
+        """Sanitize once before sending to the selected destination; never duplicate live events."""
+        from .cloud_tracing import operational_warning
+        try:
+            details = _safe(details)
+            if self.demo:
+                self._write_local(event, details)
+            elif self.cloud:
+                self.cloud.event(event, details)
+        except Exception:
+            operational_warning("offline_trace_write_failed" if self.demo else "langfuse_delivery_failed", self.request_id)
+
+    def _write_local(self, event, details):
+        """Persist offline demonstration events, closing the file after each write."""
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         record = {"timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-                  "request_id": self.request_id, "event": event, "details": _safe(details)}
+                  "request_id": self.request_id, "event": event, "details": details}
         # A single write under a lock prevents threads from interleaving JSON lines.
         with _write_lock, os.fdopen(os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "a", encoding="utf-8") as stream:
             stream.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
 
+    def close(self):
+        if self.cloud:
+            from .cloud_tracing import operational_warning
+            try:
+                self.cloud.close(self.outcome)
+            except Exception:
+                operational_warning("langfuse_delivery_failed", self.request_id)
     def reject(self, reason, **details):
         """Record validation/configuration failures even when no specialist was called."""
         self.outcome = "rejected"
@@ -162,6 +186,15 @@ class RequestTrace:
         self.event("request_failed", diagnostics=failure_details(exc))
 
 
+def model_callbacks(model, provider=None):
+    """Bind a metadata-only callback to this request, including worker-thread calls."""
+    from .cloud_tracing import MetadataModelCallback
+    trace = _active_trace.get()
+    if trace is None or trace.cloud is None:
+        return []
+    return [MetadataModelCallback(trace.cloud, _safe({"model": model})["model"], provider=provider)]
+
+
 def log_event(event, **details):
     """Nested services can log without importing Streamlit or passing IDs everywhere."""
     trace = _active_trace.get()
@@ -171,12 +204,12 @@ def log_event(event, **details):
 
 @contextmanager
 def request_trace(brief, demo=False):
-    """Create a request file, attach its context and always record a final outcome.
+    """Attach the selected tracing destination and always record a final outcome.
     
     The UI opens this context before validation so rejected submissions are recorded
     too. Unhandled exceptions are logged and re-raised. The finally block restores the
     previous context, preventing later work from attaching to the wrong request."""
-    trace = RequestTrace()
+    trace = RequestTrace(demo=demo)
     token = _active_trace.set(trace)
     started = perf_counter()
     try:
@@ -189,18 +222,24 @@ def request_trace(brief, demo=False):
         try:
             trace.event("request_finished", outcome=trace.outcome, duration_ms=round((perf_counter() - started) * 1000, 2))
         finally:
-            _active_trace.reset(token)
+            try:
+                trace.close()
+            finally:
+                _active_trace.reset(token)
 
 
 @contextmanager
-def resume_trace(request_id):
+def resume_trace(request_id, demo=False):
     """Reconnect a later PowerPoint preparation to its original analysis trace."""
-    trace = RequestTrace(request_id)
+    trace = RequestTrace(request_id, demo=demo, resumed=True)
     token = _active_trace.set(trace)
     try:
         yield trace
     finally:
-        _active_trace.reset(token)
+        try:
+            trace.close()
+        finally:
+            _active_trace.reset(token)
 
 
 def sanitize_existing_logs():
