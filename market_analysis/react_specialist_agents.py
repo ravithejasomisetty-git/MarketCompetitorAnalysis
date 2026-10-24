@@ -258,13 +258,17 @@ class ComparisonAgent:
         that the returned assessment covers the supplied names and uses permitted evidence."""
         messages = [SystemMessage(content=SYSTEM + "\nRole: Market opportunity and comparison analyst. Use only supplied profiles and evidence. "
                     "An existing selected product is OPTIONAL. If absent, explore the category; never invent a selected product. "
-                    "Return an assessment for EACH supplied product with exact name, concise positives, negatives and suggested improvements. "
+                    "Return an assessment for EACH supplied product with exact name, its top three positives and top three negatives or improvement areas. "
+                    "Rank points by relevance to the requested use, market and budget, most relevant first. "
+                    "Give three distinct points in each list when supported; use fewer when evidence is insufficient, never filler. "
+                    "Label missing information as an information gap, not a proven product weakness. "
+                    "Suggested improvements must address the listed negatives in the same order, without adding unrelated issues. "
                     "Cite only that profile's source_ids. If evidence is missing, say Unknown instead of inventing advantages or complaints. "
                     "Return up to six opportunities grouped by relevant dimensions such as performance, price, service or usability. "
                     "Each opportunity must separate an evidenced observation from a suggested improvement and cite supporting retrieved source_ids. "
                     "Opportunities are hypotheses, not proven customer demand. Return no opportunities if there is no supporting evidence. "
                     "Explain why the three products are relevant; do not claim best-selling status. Give a short market verdict, "
-                    "or compare the existing product if supplied. Keep each point under 35 words and the verdict under 100 words. "
+                    "or compare the existing product if supplied. Keep assessment points under 16 words and the verdict under 100 words. "
                     "Disclose gaps, regional uncertainty and review limitations. Follow agent_assignment. Do not invent facts or scores."),
                     HumanMessage(content=json.dumps(context, ensure_ascii=False))]
         return Summary.model_validate(model.with_structured_output(Summary).invoke(messages))

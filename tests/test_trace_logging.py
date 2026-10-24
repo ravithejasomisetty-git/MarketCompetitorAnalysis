@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock, patch
 from langchain_core.messages import AIMessage
-from market_analysis.offline_demo_research import DemoServices
+from support.fake_research_services import DemoServices
 from market_analysis.research_errors import run_step, ResearchFailure
 from market_analysis.trace_logging import request_trace, resume_trace, log_event, safe_url, sanitize_existing_logs
 from market_analysis.workflow_orchestrator import compare

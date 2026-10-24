@@ -9,7 +9,7 @@ from market_analysis.research_errors import ResearchFailure
 from langchain_core.messages import AIMessage
 from market_analysis.live_research_services import LiveServices
 from market_analysis.react_specialist_agents import DISCOVERY_AGENT, PRODUCT_RESEARCH_AGENT
-from market_analysis.offline_demo_research import DemoServices
+from support.fake_research_services import DemoServices
 from test_comparison import REQUEST
 
 

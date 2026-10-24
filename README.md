@@ -229,7 +229,7 @@ Presentations contain at most six slides in a fixed order:
 
 1. Introduction: category, region, budget and optional existing product or idea.
 2. Comparison and opportunities, including key limitations.
-3. One slide per product: overview, positives, negatives and suggested improvements.
+3. One slide per product: overview, top three positives, top three negatives or gaps, and corresponding suggested improvements. Points are ordered by relevance to the brief. If evidence supports fewer than three, the report provides fewer and identifies uncertainty instead of inventing findings.
 
 Exploration with three competitors produces five slides. Comparing an existing
 product against three competitors produces six. Longer findings are condensed to
@@ -347,7 +347,7 @@ project access appropriately; metadata still reveals operational activity and ti
 | `market_analysis/react_specialist_agents.py` | Discovery, shared product research and opportunity/comparison agents |
 | `market_analysis/live_research_services.py` | Routed model and Tavily search/page adapters |
 | `market_analysis/model_router.py` | OpenAI-first availability retries, Nebius fallback and provider-specific bindings |
-| `market_analysis/offline_demo_research.py` | Fictional fixtures and a clearly labelled scripted coordinator |
+| `tests/support/fake_research_services.py` | Fictional fixtures and a clearly labelled scripted coordinator |
 | `market_analysis/research_schemas.py` | Validated requests, optional selected product, facts, assessments and opportunities |
 | `market_analysis/research_errors.py` | Safe error messages and diagnostics without raw provider payloads |
 | `market_analysis/trace_logging.py` | Request IDs, private event routing, offline JSONL and historical sanitization |
@@ -363,7 +363,7 @@ Comments explain the key steps for readers unfamiliar with Python.
 Start with `streamlit_research_app.py`, then follow its call to `compare` in
 `workflow_orchestrator.py`. The orchestrator exposes specialist actions implemented
 in `react_specialist_agents.py`. `live_research_services.py` connects those agents
-to providers; `offline_demo_research.py` supplies fictional replacements.
+to providers; `tests/support/fake_research_services.py` supplies fictional replacements.
 Finally, `presentation_export.py` turns the saved result into slides, and
 `powerpoint_renderer.mjs` writes the PowerPoint file.
 
@@ -422,7 +422,7 @@ a widget interaction. It is not a database or permanent report archive.
 
 The important boundary is `if submitted:`. A click on **Explore market** makes that
 condition true. The code clears the previous result, starts a request trace, checks
-the entered values and selects either `LiveServices` or `DemoServices`. It then
+the entered values and creates `LiveServices`. Test helpers are not selected by the application. It then
 calls `compare(...)`. Changing a slide does not enter this
 branch, so those actions do not repeat paid research.
 
@@ -576,7 +576,7 @@ bytes for the download button. Neither the renderer nor the exporter calls an AI
 ### 8. Use developer fixtures without provider calls
 
 The browser does not expose offline demonstration mode. Developer fixtures remain
-available in `offline_demo_research.py` for automated tests and direct Python use.
+available in `tests/support/fake_research_services.py` for automated tests and direct Python use.
 `DemoOrchestratorModel.invoke()` returns scripted
 requests for discovery, research, assessment and completion. `DemoServices` provides
 fictional products through the same method signatures as the live adapter. This

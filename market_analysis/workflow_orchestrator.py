@@ -53,7 +53,7 @@ def compare(request, services, progress=lambda message: None):
     """Run one coordinator conversation and return its checked analysis.
     
     request is a dictionary matching ResearchRequest. services is a LiveServices or
-    DemoServices instance. progress is an optional callback for other callers; the
+    test substitute implementing the same operations. progress is an optional callback for other callers; the
     Streamlit UI currently uses its own status label instead of showing these messages.
     The state dictionary holds findings for this request, while counts limits actual
     specialist calls. Failed prerequisites return observations so the AI can recover;

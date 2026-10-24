@@ -5,7 +5,7 @@ Mocks supply predictable answers so these checks make no paid research calls.
 import unittest
 from unittest.mock import Mock
 from langchain_core.messages import AIMessage
-from market_analysis.offline_demo_research import DemoServices
+from support.fake_research_services import DemoServices
 from market_analysis.research_schemas import Shortlist
 from market_analysis.workflow_orchestrator import compare
 from market_analysis.research_errors import ResearchFailure

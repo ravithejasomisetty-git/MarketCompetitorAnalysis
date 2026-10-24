@@ -12,7 +12,7 @@ from market_analysis import cloud_tracing
 from market_analysis.cloud_tracing import MetadataModelCallback, operational_warning
 from market_analysis.trace_logging import request_trace, resume_trace, log_event, model_callbacks
 from market_analysis.research_errors import run_step, ResearchFailure
-from market_analysis.offline_demo_research import DemoServices
+from support.fake_research_services import DemoServices
 from market_analysis.workflow_orchestrator import compare
 
 BRIEF = dict(category="Electric bicycle", market="India", price_min=30000, price_max=50000, currency="INR")

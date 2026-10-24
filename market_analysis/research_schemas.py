@@ -133,9 +133,13 @@ class Shortlist(BaseModel):
 class ProductAssessment(BaseModel):
     """Evidence-based positives/negatives, plus explicitly suggested improvements."""
     name: str
-    positives: list[str] = Field(min_length=1, max_length=4)
-    negatives: list[str] = Field(min_length=1, max_length=4)
-    improvements: list[str] = Field(min_length=1, max_length=4)
+    # Three is a ceiling, not a reason to invent findings when evidence is limited.
+    positives: list[str] = Field(min_length=1, max_length=3,
+        description="Top three evidenced strengths, most relevant first; fewer if evidence is limited.")
+    negatives: list[str] = Field(min_length=1, max_length=3,
+        description="Top three evidenced weaknesses or explicitly identified information gaps, most relevant first.")
+    improvements: list[str] = Field(min_length=1, max_length=3,
+        description="Suggested improvements addressing the listed negatives in the same order; these are hypotheses.")
     source_ids: list[str]
 
 

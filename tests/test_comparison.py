@@ -7,7 +7,7 @@ from unittest.mock import Mock
 from pydantic import ValidationError
 from market_analysis.workflow_orchestrator import compare
 from market_analysis.research_errors import ResearchFailure
-from market_analysis.offline_demo_research import DemoServices
+from support.fake_research_services import DemoServices
 
 REQUEST = dict(company_url="https://example.com", category="Bicycles", product="My bike",
                market="England", price_min=800, price_max=1000, currency="GBP")

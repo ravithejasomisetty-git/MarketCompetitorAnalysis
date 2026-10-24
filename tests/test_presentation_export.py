@@ -1,11 +1,14 @@
 """Check editable six-slide summaries, source exclusion and safe previews."""
 import io
+import copy
 import unittest
 import zipfile
 from xml.etree import ElementTree
 from market_analysis.workflow_orchestrator import compare
-from market_analysis.offline_demo_research import DemoServices
+from support.fake_research_services import DemoServices
 from market_analysis.presentation_export import build_slides, slide_html, powerpoint_export
+from market_analysis.research_schemas import ProductAssessment
+from pydantic import ValidationError
 
 
 class PresentationTests(unittest.TestCase):
@@ -16,7 +19,12 @@ class PresentationTests(unittest.TestCase):
                                   price_max=50000, currency="INR"), DemoServices())
 
     def test_editable_pptx_has_product_summaries_without_source_evidence(self):
-        data = powerpoint_export(self.result)
+        result = copy.deepcopy(self.result)
+        # Distinct third points expose accidental truncation in the downloaded deck.
+        assessment = result["comparison"]["assessments"][0]
+        for field in ("positives", "negatives", "improvements"):
+            assessment[field] = [f"{field} priority {i}" for i in range(1, 4)]
+        data = powerpoint_export(result)
         with zipfile.ZipFile(io.BytesIO(data)) as package:
             paths = [n for n in package.namelist() if n.startswith("ppt/slides/slide") and n.endswith(".xml")]
             self.assertEqual(len(paths), len(build_slides(self.result)))
@@ -28,6 +36,8 @@ class PresentationTests(unittest.TestCase):
                 fonts = {n.attrib["typeface"] for n in tree.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}latin")}
                 self.assertEqual(fonts, {"Arial"})
             content = " ".join(texts)
+            for field in ("positives", "negatives", "improvements"):
+                self.assertIn(f"{field} priority 3", content)
             for expected in ["FICTIONAL DEMONSTRATION", "Example product A", "Positives", "Negatives", "hypotheses", "Comparison and opportunities"]:
                 self.assertIn(expected, content)
             # Editable text shapes are present, rather than screenshots of slides.
@@ -37,6 +47,30 @@ class PresentationTests(unittest.TestCase):
             self.assertNotIn(b"fictional-comparison", xml)
             self.assertNotIn(b"Source evidence", xml)
             self.assertNotIn(b"Fictional demonstration data", xml)
+
+    def test_three_priorities_reach_the_preview_without_adding_slides(self):
+        """The preview must retain each third point and handle older four-point results."""
+        result = copy.deepcopy(self.result)
+        assessment = result["comparison"]["assessments"][0]
+        for field in ("positives", "negatives", "improvements"):
+            assessment[field] = [f"{field} priority {i}" for i in range(1, 5)]
+        slides = build_slides(result)
+        self.assertEqual(len(slides), 5)
+        html = slide_html(slides[2], 3, 5)
+        for field in ("positives", "negatives", "improvements"):
+            self.assertIn(f"{field} priority 3", html)
+            self.assertNotIn(f"{field} priority 4", html)
+
+    def test_assessments_allow_limited_evidence_but_reject_four_priorities(self):
+        """Enforce the limit without forcing the model to invent three findings."""
+        data = dict(name="Example", source_ids=["demo"], positives=["Known strength"],
+                    negatives=["Service coverage unknown"], improvements=["Validate service coverage"])
+        self.assertEqual(len(ProductAssessment(**data).positives), 1)
+        for field in ("positives", "negatives", "improvements"):
+            with self.subTest(field=field):
+                ProductAssessment(**{**data, field: ["First", "Second", "Third"]})
+                with self.assertRaises(ValidationError):
+                    ProductAssessment(**{**data, field: ["First", "Second", "Third", "Fourth"]})
 
     def test_long_content_and_many_sources_never_expand_the_deck(self):
         result = {**self.result, "comparison": dict(self.result["comparison"])}

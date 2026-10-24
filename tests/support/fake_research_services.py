@@ -1,4 +1,4 @@
-"""Fictional replacements for live providers, used for demonstrations and tests.
+"""Test-only replacements for live providers, using fictional research data.
 
 DemoServices implements the same operations as LiveServices. Its coordinator returns
 a fixed sequence of action requests, while its research methods build synthetic
@@ -6,7 +6,7 @@ products and findings from the requested budget. This exercises the application'
 real validation and presentation path without performing web research or AI calls."""
 from datetime import datetime, timezone
 from langchain_core.messages import AIMessage
-from .research_schemas import Comparison, Product, Source, Shortlist, Summary, ProductAssessment, Opportunity
+from market_analysis.research_schemas import Comparison, Product, Source, Shortlist, Summary, ProductAssessment, Opportunity
 
 
 class DemoOrchestratorModel:

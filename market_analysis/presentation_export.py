@@ -16,7 +16,7 @@ from html import escape
 from pathlib import Path
 
 # Change this when slide content/layout changes so open sessions discard older prepared decks.
-PRESENTATION_VERSION = "executive-six-v1"
+PRESENTATION_VERSION = "executive-six-top-three-v2"
 
 
 def build_slides(result):
@@ -70,9 +70,10 @@ def build_slides(result):
         assessment = assessments.get(product["name"], {})
         slides.append(slide(product["name"], [
             section("Product overview", [price + ". " + product["availability"], product["performance"] + ". " + product["features"]], limit=140),
-            section("Positives", assessment.get("positives", ["Unknown"]), limit=140),
-            section("Negatives / gaps", assessment.get("negatives", [product["drawbacks"]]), limit=140),
-            section("Suggested improvements", assessment.get("improvements", ["More research needed."]), limit=140),
+            # Keep all three priorities visible in both the browser and the compact export.
+            section("Positives", assessment.get("positives", ["Unknown"]), count=3, limit=100),
+            section("Negatives / gaps", assessment.get("negatives", [product["drawbacks"]]), count=3, limit=100),
+            section("Suggested improvements", assessment.get("improvements", ["More research needed."]), count=3, limit=100),
         ]))
     return slides
 

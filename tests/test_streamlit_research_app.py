@@ -4,7 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 from contextlib import contextmanager
-from market_analysis.offline_demo_research import DemoServices
+from support.fake_research_services import DemoServices
 from market_analysis.trace_logging import request_trace as original_trace, resume_trace as original_resume
 from unittest.mock import patch
 from streamlit.testing.v1 import AppTest
@@ -53,9 +53,9 @@ class AppTests(unittest.TestCase):
 
     def test_safety_decline_shows_polite_warning_without_research(self):
         app = self.app()
-        with patch("market_analysis.offline_demo_research.DemoServices.screen_request",
+        with patch("support.fake_research_services.DemoServices.screen_request",
                    return_value={"outcome": "decline", "reason": "instruction_override"}), \
-             patch("market_analysis.offline_demo_research.DemoServices.orchestrator_model") as coordinator:
+             patch("support.fake_research_services.DemoServices.orchestrator_model") as coordinator:
             button(app, "Explore market").click().run()
         coordinator.assert_not_called()
         self.assertFalse(app.exception)
@@ -243,7 +243,7 @@ class AppTests(unittest.TestCase):
 
     def test_discovery_failure_is_safe_persistent_and_recoverable(self):
         app = self.app()
-        with patch("market_analysis.offline_demo_research.DemoServices.discover", side_effect=ValueError("secret-provider-payload")):
+        with patch("support.fake_research_services.DemoServices.discover", side_effect=ValueError("secret-provider-payload")):
             button(app, "Explore market").click().run()
         self.assertFalse(app.exception)
         self.assertNotIn("Competitor discovery", app.error[0].value)

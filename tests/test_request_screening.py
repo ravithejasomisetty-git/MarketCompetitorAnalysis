@@ -2,7 +2,7 @@
 import json
 import unittest
 from unittest.mock import Mock
-from market_analysis.offline_demo_research import DemoServices
+from support.fake_research_services import DemoServices
 from market_analysis.request_screening import classify_request, ScreeningDecision
 from market_analysis.research_errors import ResearchFailure
 from market_analysis.workflow_orchestrator import compare
